@@ -10,6 +10,7 @@
 #include <avr/io.h>
 #include <../source/scheduler.h>
 #include <../source/timer.h>
+#include <../source/pwm.h>
 #include <stdlib.h>
 #ifdef _SIMULATE_
 #include "simAVRHeader.h"
@@ -21,11 +22,11 @@ const unsigned short DOWN_THRESH = 750;
 
 // Left paddle
 const unsigned char LEFT_X = 0x80;
-unsigned char leftPos = 0;
+unsigned char leftPos = 2;
 
 // Right paddle
 const unsigned char RIGHT_X = 0x01;
-unsigned char rightPos = 0;
+unsigned char rightPos = 1;
 
 // Ball
 unsigned char up = 0;
@@ -317,7 +318,7 @@ void goal() {
         rightPoints++;
     }
 
-    PORTB = (leftPoints << 4) | rightPoints;
+    PORTB = (leftPoints << 3) | rightPoints;
 
     if (leftPoints > 2 || rightPoints > 2) {
         gameOver = 1;
@@ -340,20 +341,24 @@ int BallTick(int state) {
             // Initial left/right direction
             dir = rand();
             if ((dir % 2) == 0 ) { state = LEFT; }
-            else { state = LEFT; }
+            else { state = RIGHT; }
             break;
 
         case LEFT:
+            set_PWM(0);
+
             // Walls
             if (ballTryX < 0x80) { 
                 state = LEFT; 
                 ballX = ballTryX; 
                 ballY = ballTryY; 
+                set_PWM(261.63);
             }
             else { 
                 state = RIGHT; 
                 ballX = ballTryX; 
                 ballY = ballTryY; 
+                set_PWM(261.63);
             }
 
             // Speed up the ball after hitting a wall
@@ -366,10 +371,12 @@ int BallTick(int state) {
 
                     ballX = ballX >> 1;
                     ballRand(state);
+                    set_PWM(329.63);
                 }
                 else {
                     rightGoal = 1;
                     goal();
+                    set_PWM(493.88);
                 }
             }
 
@@ -378,16 +385,20 @@ int BallTick(int state) {
             break;
 
         case RIGHT:
+            set_PWM(0);
+
             // Walls
             if (ballTryX > 0x01) { 
                 state = RIGHT; 
                 ballX = ballTryX; 
                 ballY = ballTryY; 
+                set_PWM(261.63);
             }
             else { 
                 state = LEFT; 
                 ballX = ballTryX; 
                 ballY = ballTryY; 
+                set_PWM(261.63);
             }
 
             // Speed up the ball after hitting a wall
@@ -400,9 +411,11 @@ int BallTick(int state) {
 
                     ballX = ballX << 1;
                     ballRand(state);
+                    set_PWM(329.63);
                 }
                 else {
                     leftGoal = 1;
+                    set_PWM(493.88);
                     goal();
                 }
             }
@@ -450,7 +463,9 @@ void startAgain() {
     ballY = 2;
     ballTryY = 2;
     play = 0;
-    PORTB = 0x00;
+    leftPos = 2;
+    rightPos = 1;
+    set_PWM(0);
 }
 
 enum GoalStates {WAIT, END, LARROW, LARROW_, LARROW__, RARROW, RARROW_, RARROW__};
@@ -569,7 +584,7 @@ int GGTick(int state) {
     // Transitions
     switch(state) {
         case GWAIT:
-            if (gameOver == 1) { state = G; }
+            if (gameOver == 1) { set_PWM(659.25); PORTB = 0x00; state = G; }
             else { state = GWAIT; }
             break;
 
@@ -580,7 +595,7 @@ int GGTick(int state) {
             }
             else {
                 hold = 0;
-                PORTB = 0x00;
+                set_PWM(0);
             }
             break;
 
@@ -807,6 +822,7 @@ int main(void) {
 
     TimerSet(GCD);
     TimerOn();
+    PWM_on();
 
     while (1) {
         unsigned char butAI = (~PINA & 0x10);
@@ -858,6 +874,8 @@ int main(void) {
                 ballTryX = 0x08;
                 ballY = 2;
                 ballTryY = 2;
+                leftPos = 2;
+                rightPos = 1;
 
                 leftGoal = 0;
                 rightGoal = 0;
@@ -866,6 +884,7 @@ int main(void) {
                 play = 0;
                 gameOver = 0;
                 PORTB = 0x00;
+                set_PWM(0);
 
                 // PORTC
                 transmit_data(0x00, 0);
