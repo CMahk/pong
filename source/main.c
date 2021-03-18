@@ -37,8 +37,17 @@ unsigned char ballY = 2;
 double ballSpeed = 0;
 
 // General purpose
-unsigned char reset = 1;
+// Tasks
+static task task0, task1, task2, task3, task4, task5;
+task *tasks[] = {&task0, &task1, &task2, &task3, &task4, &task5};
+const unsigned short numTasks = sizeof(tasks)/sizeof(task*);
+
+unsigned char hold = 1;
 unsigned char useAI = 0;
+unsigned char leftGoal = 0;
+unsigned char rightGoal = 0;
+unsigned char leftPoints = 0;
+unsigned char rightPoints = 0;
 
 // Pins on PORTA are used as input for A2D conversion
 // The default channel is 0 (PA0)
@@ -297,6 +306,17 @@ void ballRand(int state) {
     }
 }
 
+void goal() {
+    hold = 1;
+
+    if (leftGoal == 1) {
+        leftPoints++;
+    }
+    else if (rightGoal == 1) {
+        rightPoints++;
+    }
+}
+
 enum BallStates {INIT, LEFT, RIGHT};
 int BallTick(int state) {
     // Transitions
@@ -340,6 +360,10 @@ int BallTick(int state) {
                     ballX = ballX >> 1;
                     ballRand(state);
                 }
+                else {
+                    rightGoal = 1;
+                    goal();
+                }
             }
 
             if (ballSpeed <= 20)
@@ -369,6 +393,10 @@ int BallTick(int state) {
 
                     ballX = ballX << 1;
                     ballRand(state);
+                }
+                else {
+                    leftGoal = 1;
+                    goal();
                 }
             }
 
@@ -400,10 +428,131 @@ int BallTick(int state) {
     return state;
 }
 
+void startAgain() {
+    for (int i = 0; i < numTasks; i++) {
+        tasks[i]->elapsedTime = 0;
+        tasks[i]->state = 0;
+    }
+
+    // PORTC
+    transmit_data(0x00, 0);
+    // PORTD
+    transmit_data(0x00, 1);
+    ballX = 0x08;
+    ballTryX = 0x08;
+    ballY = 2;
+    ballTryY = 2;
+}
+
+enum GoalStates {WAIT, LARROW, LARROW_, LARROW__, RARROW, RARROW_, RARROW__};
+int GoalTick(int state) {
+    static unsigned char count = 0;
+
+    // Transitions
+    switch(state) {
+        case WAIT:
+            if (leftGoal == 1) { state = LARROW; count = 0; }
+            else if (rightGoal == 1) { state = RARROW; count = 0; }
+            else { state = WAIT; }
+            break;
+
+        case LARROW:
+            if (count < 80) {
+                state = LARROW_;
+                count++;
+            }
+            else {
+                state = WAIT;
+                leftGoal = 0;
+                hold = 0;
+                count = 0;
+                startAgain();
+            }
+            break;
+
+        case LARROW_:
+            state = LARROW__;
+            break;
+
+        case LARROW__:
+            state = LARROW;
+            break;
+
+        case RARROW:
+            if (count < 80) {
+                state = RARROW_;
+                count++;
+            }
+            else {
+                state = WAIT;
+                rightGoal = 0;
+                hold = 0;
+                count = 0;
+                startAgain();
+            }
+            break;
+
+        case RARROW_:
+            state = RARROW__;
+            break;
+
+        case RARROW__:
+            state = RARROW;
+            break;
+    }
+
+    // State actions
+    switch(state) {
+        case LARROW:
+            // PORTC
+            transmit_data(0x20, 0);
+            // PORTD
+            transmit_data(0x1D, 1);
+            break;
+
+        case LARROW_:
+            // PORTC
+            transmit_data(0x7E, 0);
+            // PORTD
+            transmit_data(0x1B, 1);
+            break;
+
+        case LARROW__:
+            // PORTC
+            transmit_data(0x20, 0);
+            // PORTD
+            transmit_data(0x17, 1);
+            break;
+
+        case RARROW:
+            // PORTC
+            transmit_data(0x04, 0);
+            // PORTD
+            transmit_data(0x1D, 1);
+            break;
+
+        case RARROW_:
+            // PORTC
+            transmit_data(0x7E, 0);
+            // PORTD
+            transmit_data(0x1B, 1);
+            break;
+
+        case RARROW__:
+            // PORTC
+            transmit_data(0x04, 0);
+            // PORTD
+            transmit_data(0x17, 1);
+            break;
+    }
+
+    return state;
+}
+
 enum AIStates {AIREAD, AIMOVE, AIHOLD};
 int AITick(int state) {
     if (useAI == 1) {
-        
+
     }
 
     return state;
@@ -483,11 +632,6 @@ int main(void) {
     // Joystick up / down only
     Set_A2D_Pin(1);
 
-    // Tasks
-    static task task0, task1, task2, task3, task4;
-    task *tasks[] = {&task0, &task1, &task2, &task3, &task4};
-    const unsigned short numTasks = sizeof(tasks)/sizeof(task*);
-
     const char start = 0;
 
     // Task 0 (Matrix Display)
@@ -520,6 +664,12 @@ int main(void) {
     task4.elapsedTime = task4.period;
     task4.TickFct = &RightTick;
 
+    // Task 5 (Goal made)
+    task5.state = start;
+    task5.period = 5;
+    task5.elapsedTime = task5.period;
+    task5.TickFct = &GoalTick;
+
     TimerSet(GCD);
     TimerOn();
 
@@ -528,19 +678,28 @@ int main(void) {
         unsigned char but2P = (~PINA & 0x08);
         unsigned char butReset = (~PINA & 0x01);
 
-        if (reset == 1) {
+        if (hold == 1) {
             if (butAI == 16) {
                 useAI = 1;
-                reset = 0;
+                hold = 0;
             }
             else if (but2P == 8) {
                 useAI = 0;
-                reset = 0;
+                hold = 0;
             }
+
+            if (leftGoal == 1 || rightGoal == 1) {
+                if (task5.elapsedTime >= task5.period) {
+                    task5.state = task5.TickFct(task5.state);
+                    task5.elapsedTime = 0;
+                }
+
+                task5.elapsedTime += GCD;
+            } 
         }
         else {
             if (butReset == 1) {
-                reset = 1;
+                hold = 1;
                 for (int i = 0; i < numTasks; i++) {
                     tasks[i]->elapsedTime = 0;
                     tasks[i]->state = start;
@@ -551,7 +710,14 @@ int main(void) {
                 // PORTD
                 transmit_data(0x00, 1);
                 ballX = 0x08;
+                ballTryX = 0x08;
                 ballY = 2;
+                ballTryY = 2;
+
+                leftGoal = 0;
+                rightGoal = 0;
+                leftPoints = 0;
+                rightPoints = 0;
             }
             else {
                 task1.period = ballSpeed;
