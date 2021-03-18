@@ -37,9 +37,8 @@ unsigned char ballY = 2;
 double ballSpeed = 0;
 
 // General purpose
-// Tasks
-static task task0, task1, task2, task3, task4, task5;
-task *tasks[] = {&task0, &task1, &task2, &task3, &task4, &task5};
+static task task0, task1, task2, task3, task4, task5, task6;
+task *tasks[] = {&task0, &task1, &task2, &task3, &task4, &task5, &task6};
 const unsigned short numTasks = sizeof(tasks)/sizeof(task*);
 
 unsigned char hold = 1;
@@ -48,6 +47,8 @@ unsigned char leftGoal = 0;
 unsigned char rightGoal = 0;
 unsigned char leftPoints = 0;
 unsigned char rightPoints = 0;
+unsigned char play = 0;
+unsigned char gameOver = 0;
 
 // Pins on PORTA are used as input for A2D conversion
 // The default channel is 0 (PA0)
@@ -315,6 +316,12 @@ void goal() {
     else if (rightGoal == 1) {
         rightPoints++;
     }
+
+    PORTB = (leftPoints << 4) | rightPoints;
+
+    if (leftPoints > 2 || rightPoints > 2) {
+        gameOver = 1;
+    }
 }
 
 enum BallStates {INIT, LEFT, RIGHT};
@@ -442,9 +449,11 @@ void startAgain() {
     ballTryX = 0x08;
     ballY = 2;
     ballTryY = 2;
+    play = 0;
+    PORTB = 0x00;
 }
 
-enum GoalStates {WAIT, LARROW, LARROW_, LARROW__, RARROW, RARROW_, RARROW__};
+enum GoalStates {WAIT, END, LARROW, LARROW_, LARROW__, RARROW, RARROW_, RARROW__};
 int GoalTick(int state) {
     static unsigned char count = 0;
 
@@ -456,17 +465,25 @@ int GoalTick(int state) {
             else { state = WAIT; }
             break;
 
+        case END:
+            leftGoal = 0;
+            rightGoal = 0;
+            count = 0;
+
+            if (gameOver == 0) {
+                startAgain();
+                state = WAIT;
+                hold = 0;
+            }
+            break;
+
         case LARROW:
             if (count < 80) {
                 state = LARROW_;
                 count++;
             }
             else {
-                state = WAIT;
-                leftGoal = 0;
-                hold = 0;
-                count = 0;
-                startAgain();
+                state = END;
             }
             break;
 
@@ -484,11 +501,7 @@ int GoalTick(int state) {
                 count++;
             }
             else {
-                state = WAIT;
-                rightGoal = 0;
-                hold = 0;
-                count = 0;
-                startAgain();
+                state = END;
             }
             break;
 
@@ -543,6 +556,86 @@ int GoalTick(int state) {
             transmit_data(0x04, 0);
             // PORTD
             transmit_data(0x17, 1);
+            break;
+    }
+
+    return state;
+}
+
+enum GGStates {GWAIT, G, G_, G__, G___, G____};
+int GGTick(int state) {
+    static unsigned char count = 0;
+
+    // Transitions
+    switch(state) {
+        case GWAIT:
+            if (gameOver == 1) { state = G; }
+            else { state = GWAIT; }
+            break;
+
+        case G:
+            if (count < 160) {
+                state = G_;
+                count++;
+            }
+            else {
+                hold = 0;
+                PORTB = 0x00;
+            }
+            break;
+
+        case G_:
+            state = G__;
+            break;
+
+        case G__:
+            state = G___;
+            break;
+
+        case G___:
+            state = G____;
+            break;
+
+        case G____:
+            state = G;
+            break;
+    }
+
+    // State actions
+    switch(state) {
+        case G:
+            // PORTC
+            transmit_data(0xFF, 0);
+            // PORTD
+            transmit_data(0x1E, 1);
+            break;
+
+        case G_:
+            // PORTC
+            transmit_data(0x88, 0);
+            // PORTD
+            transmit_data(0x1D, 1);
+            break;
+
+        case G__:
+            // PORTC
+            transmit_data(0xBB, 0);
+            // PORTD
+            transmit_data(0x1B, 1);
+            break;
+
+        case G___:
+            // PORTC
+            transmit_data(0x99, 0);
+            // PORTD
+            transmit_data(0x17, 1);
+            break;
+
+        case G____:
+            // PORTC
+            transmit_data(0xFF, 0);
+            // PORTD
+            transmit_data(0x0F, 1);
             break;
     }
 
@@ -670,6 +763,12 @@ int main(void) {
     task5.elapsedTime = task5.period;
     task5.TickFct = &GoalTick;
 
+    // Task 6 (Game Over screen)
+    task6.state = start;
+    task6.period = 5;
+    task6.elapsedTime = task6.period;
+    task6.TickFct = &GGTick;
+
     TimerSet(GCD);
     TimerOn();
 
@@ -677,6 +776,11 @@ int main(void) {
         unsigned char butAI = (~PINA & 0x10);
         unsigned char but2P = (~PINA & 0x08);
         unsigned char butReset = (~PINA & 0x01);
+        unsigned char butStart = (~PINA & 0x80);
+
+        if (butStart == 128) {
+            play = 1;
+        }
 
         if (hold == 1) {
             if (butAI == 16) {
@@ -695,20 +799,25 @@ int main(void) {
                 }
 
                 task5.elapsedTime += GCD;
+            }
+
+            if (gameOver == 1 && leftGoal == 0 && rightGoal == 0) {
+                if (task6.elapsedTime >= task6.period) {
+                    task6.state = task6.TickFct(task6.state);
+                    task6.elapsedTime = 0;
+                }
+
+                task6.elapsedTime += GCD;
             } 
         }
         else {
-            if (butReset == 1) {
+            if (butReset == 1 || gameOver == 1) {
                 hold = 1;
                 for (int i = 0; i < numTasks; i++) {
                     tasks[i]->elapsedTime = 0;
                     tasks[i]->state = start;
                 }
 
-                // PORTC
-                transmit_data(0x00, 0);
-                // PORTD
-                transmit_data(0x00, 1);
                 ballX = 0x08;
                 ballTryX = 0x08;
                 ballY = 2;
@@ -718,8 +827,26 @@ int main(void) {
                 rightGoal = 0;
                 leftPoints = 0;
                 rightPoints = 0;
+                play = 0;
+                gameOver = 0;
+                PORTB = 0x00;
+
+                // PORTC
+                transmit_data(0x00, 0);
+                // PORTD
+                transmit_data(0x1F, 1);
             }
-            else {
+
+            if (butReset == 0 && play == 0) {
+                if (task0.elapsedTime >= task0.period) {
+                    task0.state = task0.TickFct(task0.state);
+                    task0.elapsedTime = 0;
+                }
+
+                task0.elapsedTime += GCD;
+            }
+
+            if (butReset == 0 && play == 1) {
                 task1.period = ballSpeed;
 
                 for (int i = 0; i < numTasks; i++) {
