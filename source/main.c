@@ -642,10 +642,46 @@ int GGTick(int state) {
     return state;
 }
 
-enum AIStates {AIREAD, AIMOVE, AIHOLD};
+enum AIStates {AIREAD, AIMOVE};
 int AITick(int state) {
-    if (useAI == 1) {
+    unsigned char readY = 0;
+    unsigned char decision = rand() % 4;
 
+    if (useAI == 1) {
+        // Transitions
+        switch(state) {
+            case AIREAD:
+                readY = ballY;
+                state = AIMOVE;
+                break;
+
+            case AIMOVE:
+                state = AIREAD;
+                break;
+
+            default:
+                state = AIREAD;
+                break;
+        }
+
+        // State actions
+        switch(state) {
+            case AIMOVE:
+                if (readY > rightPos) {
+                    if (decision > 0)
+                        if (rightPos < 3)
+                            rightPos++;
+                }
+                else if (readY < rightPos) {
+                    if (decision > 0)
+                        if (rightPos > 0)
+                            rightPos--;
+                }
+                break;
+
+            default:
+                break;
+        }
     }
 
     return state;
@@ -747,7 +783,7 @@ int main(void) {
 
     // Task 3 (AI)
     task3.state = start;
-    task3.period = 30;
+    task3.period = 60;
     task3.elapsedTime = task3.period;
     task3.TickFct = &AITick;
 
